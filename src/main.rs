@@ -4,11 +4,21 @@
 /// Topic 2: The REPL pattern - Read, Eval, Print, Loop
 /// Topic 3: CLI interface - args, feedback, modes
 /// Topic 4: HTTP Requests and API Basics
+/// Topic 5: The Anthropic API - system prompts, message history
 
 mod api;
 
+use api::Message;
 use clap::Parser;
 use std::io::{self, Write};
+
+/// System prompt defines the agent's persona and behavior
+const SYSTEM_PROMPT: &str = r#"You are Johnathan, an AI coding assistant.
+
+You help users with programming tasks. Be concise and direct.
+When asked to perform tasks, explain what you're doing briefly.
+
+You are running as a CLI agent and can have multi-turn conversations."#;
 
 /// An AI agent that can perform tasks
 #[derive(Parser)]
@@ -41,7 +51,8 @@ fn main() {
 
     if cli.verbose {
         println!("[verbose mode enabled]");
-        println!("[API key loaded]\n");
+        println!("[API key loaded]");
+        println!("[System prompt: {} chars]\n", SYSTEM_PROMPT.len());
     }
 
     // Two modes: interactive (REPL) or non-interactive (single prompt)
@@ -51,7 +62,7 @@ fn main() {
             run_once(&prompt, &api_key, cli.verbose);
         }
         None => {
-            // Interactive: enter the REPL
+            // Interactive: enter the REPL with conversation history
             run_repl(&api_key, cli.verbose);
         }
     }
@@ -64,13 +75,18 @@ fn run_once(prompt: &str, api_key: &str, verbose: bool) {
         println!("[prompt: {}]\n", prompt);
     }
 
-    let response = eval(prompt, api_key, verbose);
+    // Single message, no history needed
+    let messages = vec![Message::user(prompt)];
+    let response = eval(messages, api_key, verbose);
     println!("{}", response);
 }
 
-/// Interactive mode: the REPL
+/// Interactive mode: the REPL with conversation history
 fn run_repl(api_key: &str, verbose: bool) {
     println!("Type 'quit' or 'exit' to stop.\n");
+
+    // Conversation history persists across turns
+    let mut history: Vec<Message> = Vec::new();
 
     loop {
         let input = match read_input() {
@@ -83,7 +99,19 @@ fn run_repl(api_key: &str, verbose: bool) {
             break;
         }
 
-        let response = eval(&input, api_key, verbose);
+        // Add user message to history
+        history.push(Message::user(&input));
+
+        if verbose {
+            println!("[history: {} messages]", history.len());
+        }
+
+        // Get response with full history
+        let response = eval(history.clone(), api_key, verbose);
+
+        // Add assistant response to history
+        history.push(Message::assistant(&response));
+
         println!("{}\n", response);
     }
 }
@@ -108,26 +136,24 @@ fn should_exit(input: &str) -> bool {
     lower == "quit" || lower == "exit" || lower == "q"
 }
 
-/// EVAL: Process input and generate response
-/// Now includes a "thinking" indicator and API key (for Topic 4)
-fn eval(input: &str, api_key: &str, verbose: bool) -> String {
-    // Show thinking indicator
+/// EVAL: Send messages to Claude and get response
+fn eval(messages: Vec<Message>, api_key: &str, verbose: bool) -> String {
     print!("Thinking...");
     io::stdout().flush().ok();
 
-    // Call the Claude API
-    let result = api::send_message(api_key, input);
+    // Call API with history and system prompt
+    let result = api::send_messages(api_key, messages, Some(SYSTEM_PROMPT));
 
-    // Clear the thinking indicator
+    // Clear thinking indicator
     print!("\r            \r");
     io::stdout().flush().ok();
 
     match result {
         Ok(response) => {
             if verbose {
-                println!("[API call successful]");
+                println!("[stop_reason: {}]", response.stop_reason);
             }
-            response
+            response.text
         }
         Err(e) => {
             if verbose {

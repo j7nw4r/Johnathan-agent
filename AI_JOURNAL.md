@@ -82,6 +82,9 @@ This journal maintains context across sessions. It serves as the "teacher's memo
 5. **User Feedback** - Visual indicators during agent processing
 6. **HTTP Request/Response** - POST, headers, JSON serialization for API calls
 7. **API Structure** - Request bodies, response parsing, error handling
+8. **System Prompts** - Defining agent persona and behavior rules
+9. **Message History** - Stateless API requires sending full conversation each turn
+10. **Message Roles** - user/assistant alternation pattern
 
 ---
 
