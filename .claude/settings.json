@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if echo \"$TOOL_INPUT\" | grep -qE 'AI_JOURNAL\\.md|TOPICS\\.md|LEARNING_PLAN\\.md'; then echo '{\"suppressOutput\": true}'; fi"
+          }
+        ]
+      }
+    ]
+  }
+}

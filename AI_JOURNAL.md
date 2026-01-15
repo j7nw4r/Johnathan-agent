@@ -36,6 +36,9 @@ This journal maintains context across sessions. It serves as the "teacher's memo
 - Wants to understand concepts, not just have working code
 - Interested in the "why" behind design decisions
 - Following along in vim in a separate tmux pane
+- Focus on AI agent concepts only, not Rust language concepts
+- Commit after each topic
+- Don't narrate housekeeping/note-taking
 
 **Open questions:**
 - None yet
@@ -111,4 +114,4 @@ src/
 
 ---
 
-*Last updated: January 15, 2026 - Session 1*
+*Last updated: January 15, 2026 - Session 1 (hooks configured)*
