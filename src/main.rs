@@ -3,6 +3,9 @@
 /// Topic 1: Agent = loop of observe -> think -> act
 /// Topic 2: The REPL pattern - Read, Eval, Print, Loop
 /// Topic 3: CLI interface - args, feedback, modes
+/// Topic 4: HTTP Requests and API Basics
+
+mod api;
 
 use clap::Parser;
 use std::io::{self, Write};
@@ -26,36 +29,47 @@ fn main() {
     println!("Johnathan Agent v0.1.0");
     println!("=======================\n");
 
+    // Get API key from environment
+    let api_key = match std::env::var("ANTHROPIC_API_KEY") {
+        Ok(key) => key,
+        Err(_) => {
+            eprintln!("Error: ANTHROPIC_API_KEY environment variable not set");
+            eprintln!("Set it with: export ANTHROPIC_API_KEY=your-key-here");
+            std::process::exit(1);
+        }
+    };
+
     if cli.verbose {
-        println!("[verbose mode enabled]\n");
+        println!("[verbose mode enabled]");
+        println!("[API key loaded]\n");
     }
 
     // Two modes: interactive (REPL) or non-interactive (single prompt)
     match cli.prompt {
         Some(prompt) => {
             // Non-interactive: run once and exit
-            run_once(&prompt, cli.verbose);
+            run_once(&prompt, &api_key, cli.verbose);
         }
         None => {
             // Interactive: enter the REPL
-            run_repl(cli.verbose);
+            run_repl(&api_key, cli.verbose);
         }
     }
 }
 
 /// Non-interactive mode: process a single prompt and exit
-fn run_once(prompt: &str, verbose: bool) {
+fn run_once(prompt: &str, api_key: &str, verbose: bool) {
     if verbose {
         println!("[non-interactive mode]");
         println!("[prompt: {}]\n", prompt);
     }
 
-    let response = eval(prompt, verbose);
+    let response = eval(prompt, api_key, verbose);
     println!("{}", response);
 }
 
 /// Interactive mode: the REPL
-fn run_repl(verbose: bool) {
+fn run_repl(api_key: &str, verbose: bool) {
     println!("Type 'quit' or 'exit' to stop.\n");
 
     loop {
@@ -69,7 +83,7 @@ fn run_repl(verbose: bool) {
             break;
         }
 
-        let response = eval(&input, verbose);
+        let response = eval(&input, api_key, verbose);
         println!("{}\n", response);
     }
 }
@@ -95,22 +109,31 @@ fn should_exit(input: &str) -> bool {
 }
 
 /// EVAL: Process input and generate response
-/// Now includes a "thinking" indicator
-fn eval(input: &str, verbose: bool) -> String {
-    // Show thinking indicator (will be replaced with real LLM call)
+/// Now includes a "thinking" indicator and API key (for Topic 4)
+fn eval(input: &str, api_key: &str, verbose: bool) -> String {
+    // Show thinking indicator
     print!("Thinking...");
     io::stdout().flush().ok();
 
-    // Simulate work (later: actual API call)
-    std::thread::sleep(std::time::Duration::from_millis(500));
+    // Call the Claude API
+    let result = api::send_message(api_key, input);
 
     // Clear the thinking indicator
     print!("\r            \r");
     io::stdout().flush().ok();
 
-    if verbose {
-        println!("[processed: {}]", input);
+    match result {
+        Ok(response) => {
+            if verbose {
+                println!("[API call successful]");
+            }
+            response
+        }
+        Err(e) => {
+            if verbose {
+                println!("[API error: {}]", e);
+            }
+            format!("Error: {}", e)
+        }
     }
-
-    format!("[Echo] {}", input)
 }
