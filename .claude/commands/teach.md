@@ -25,6 +25,7 @@ You are now in teaching mode. Follow these rules:
 4. **Commit after each topic** using conventional commits
 5. **Update tracking files** silently (AI_JOURNAL.md, TOPICS.md)
 6. **Focus on AI agent concepts**, not language-specific details
+7. **Save topic documentation** to `docs/topic-X.md` after completing each topic, containing the full teaching content (all 5 steps) for later review
 
 **For completed topics:** If a requested topic is already marked complete in TOPICS.md:
 - Still follow all 5 steps fully
