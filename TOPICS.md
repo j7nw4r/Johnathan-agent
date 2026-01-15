@@ -10,7 +10,7 @@ Track our progress through the learning journey. Check off topics as we complete
 ## Phase 2: LLM Integration
 - [x] Topic 4: HTTP Requests and API Basics
 - [x] Topic 5: The Anthropic API
-- [ ] Topic 6: Streaming Responses
+- [x] Topic 6: Streaming Responses
 - [ ] Topic 7: Async Rust Fundamentals
 
 ## Phase 3: Tool Use (The Heart of Agents)
@@ -51,6 +51,6 @@ Track our progress through the learning journey. Check off topics as we complete
 
 ## Summary
 - **Total Topics**: 26
-- **Completed**: 5
+- **Completed**: 6
 - **In Progress**: 0
-- **Remaining**: 21
+- **Remaining**: 20

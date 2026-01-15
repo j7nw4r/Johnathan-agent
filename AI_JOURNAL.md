@@ -85,6 +85,8 @@ This journal maintains context across sessions. It serves as the "teacher's memo
 8. **System Prompts** - Defining agent persona and behavior rules
 9. **Message History** - Stateless API requires sending full conversation each turn
 10. **Message Roles** - user/assistant alternation pattern
+11. **Streaming/SSE** - Server-Sent Events for real-time token display
+12. **Callback Pattern** - Process data chunks as they arrive
 
 ---
 

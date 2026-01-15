@@ -5,6 +5,7 @@
 /// Topic 3: CLI interface - args, feedback, modes
 /// Topic 4: HTTP Requests and API Basics
 /// Topic 5: The Anthropic API - system prompts, message history
+/// Topic 6: Streaming Responses - real-time token display
 
 mod api;
 
@@ -58,11 +59,9 @@ fn main() {
     // Two modes: interactive (REPL) or non-interactive (single prompt)
     match cli.prompt {
         Some(prompt) => {
-            // Non-interactive: run once and exit
             run_once(&prompt, &api_key, cli.verbose);
         }
         None => {
-            // Interactive: enter the REPL with conversation history
             run_repl(&api_key, cli.verbose);
         }
     }
@@ -75,17 +74,16 @@ fn run_once(prompt: &str, api_key: &str, verbose: bool) {
         println!("[prompt: {}]\n", prompt);
     }
 
-    // Single message, no history needed
     let messages = vec![Message::user(prompt)];
-    let response = eval(messages, api_key, verbose);
-    println!("{}", response);
+    let response = eval_streaming(messages, api_key, verbose);
+    // Response already printed via streaming, just add newline
+    println!("\n{}", if verbose { format!("[done: {} chars]", response.len()) } else { String::new() });
 }
 
 /// Interactive mode: the REPL with conversation history
 fn run_repl(api_key: &str, verbose: bool) {
     println!("Type 'quit' or 'exit' to stop.\n");
 
-    // Conversation history persists across turns
     let mut history: Vec<Message> = Vec::new();
 
     loop {
@@ -99,20 +97,20 @@ fn run_repl(api_key: &str, verbose: bool) {
             break;
         }
 
-        // Add user message to history
         history.push(Message::user(&input));
 
         if verbose {
             println!("[history: {} messages]", history.len());
         }
 
-        // Get response with full history
-        let response = eval(history.clone(), api_key, verbose);
+        // Get streaming response
+        let response = eval_streaming(history.clone(), api_key, verbose);
 
         // Add assistant response to history
         history.push(Message::assistant(&response));
 
-        println!("{}\n", response);
+        // Newline after streamed response
+        println!("\n");
     }
 }
 
@@ -136,30 +134,47 @@ fn should_exit(input: &str) -> bool {
     lower == "quit" || lower == "exit" || lower == "q"
 }
 
-/// EVAL: Send messages to Claude and get response
-fn eval(messages: Vec<Message>, api_key: &str, verbose: bool) -> String {
+/// EVAL with streaming: prints tokens as they arrive
+fn eval_streaming(messages: Vec<Message>, api_key: &str, verbose: bool) -> String {
+    // Show thinking indicator
     print!("Thinking...");
     io::stdout().flush().ok();
 
-    // Call API with history and system prompt
-    let result = api::send_messages(api_key, messages, Some(SYSTEM_PROMPT));
+    let mut first_chunk = true;
 
-    // Clear thinking indicator
-    print!("\r            \r");
-    io::stdout().flush().ok();
+    // Stream response, printing each chunk as it arrives
+    let result = api::send_messages_streaming(
+        api_key,
+        messages,
+        Some(SYSTEM_PROMPT),
+        |chunk| {
+            // Clear "Thinking..." on first chunk
+            if first_chunk {
+                print!("\r            \r");
+                io::stdout().flush().ok();
+                first_chunk = false;
+            }
+            // Print chunk immediately (no newline)
+            print!("{}", chunk);
+            io::stdout().flush().ok();
+        },
+    );
 
     match result {
         Ok(response) => {
             if verbose {
-                println!("[stop_reason: {}]", response.stop_reason);
+                print!(" [stop: {}]", response.stop_reason);
             }
             response.text
         }
         Err(e) => {
-            if verbose {
-                println!("[API error: {}]", e);
+            // Clear thinking indicator on error
+            if first_chunk {
+                print!("\r            \r");
             }
-            format!("Error: {}", e)
+            let msg = format!("Error: {}", e);
+            print!("{}", msg);
+            msg
         }
     }
 }
