@@ -17,3 +17,8 @@ This is an educational project to build an AI agent CLI while learning the conce
 5. Review the implementation
 
 **After each session:** Update AI_JOURNAL.md with what we covered, decisions made, and next steps.
+
+**Tool output is suppressed.** All Edit, Write, Read, Glob, Grep, and Bash outputs are hidden. Always:
+- Explain what you're changing/reading and why
+- Describe command results (compiled successfully, program output, errors)
+- Summarize search results rather than showing raw output

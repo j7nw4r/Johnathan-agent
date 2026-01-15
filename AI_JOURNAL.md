@@ -78,6 +78,8 @@ This journal maintains context across sessions. It serves as the "teacher's memo
 1. **Agent vs Chatbot** - An agent loops and acts; a chatbot responds once
 2. **The Agent Loop** - observe -> think -> act -> check (repeat)
 3. **Core Components** - Brain (LLM), Tools, World/Environment
+4. **CLI Modes** - Interactive (REPL) vs non-interactive (single prompt)
+5. **User Feedback** - Visual indicators during agent processing
 
 ---
 

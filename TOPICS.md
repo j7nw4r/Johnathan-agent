@@ -5,7 +5,7 @@ Track our progress through the learning journey. Check off topics as we complete
 ## Phase 1: Foundations
 - [x] Topic 1: What is an AI Agent?
 - [x] Topic 2: The Agent Loop (REPL Pattern)
-- [ ] Topic 3: CLI Basics in Rust
+- [x] Topic 3: CLI Basics in Rust
 
 ## Phase 2: LLM Integration
 - [ ] Topic 4: HTTP Requests and API Basics
@@ -51,6 +51,6 @@ Track our progress through the learning journey. Check off topics as we complete
 
 ## Summary
 - **Total Topics**: 26
-- **Completed**: 2
+- **Completed**: 3
 - **In Progress**: 0
-- **Remaining**: 24
+- **Remaining**: 23
