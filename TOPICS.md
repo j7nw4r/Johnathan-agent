@@ -8,7 +8,7 @@ Track our progress through the learning journey. Check off topics as we complete
 - [x] Topic 3: CLI Basics in Rust
 
 ## Phase 2: LLM Integration
-- [ ] Topic 4: HTTP Requests and API Basics
+- [x] Topic 4: HTTP Requests and API Basics
 - [ ] Topic 5: The Anthropic API
 - [ ] Topic 6: Streaming Responses
 - [ ] Topic 7: Async Rust Fundamentals
@@ -51,6 +51,6 @@ Track our progress through the learning journey. Check off topics as we complete
 
 ## Summary
 - **Total Topics**: 26
-- **Completed**: 3
+- **Completed**: 4
 - **In Progress**: 0
-- **Remaining**: 23
+- **Remaining**: 22
