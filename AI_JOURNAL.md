@@ -80,6 +80,8 @@ This journal maintains context across sessions. It serves as the "teacher's memo
 3. **Core Components** - Brain (LLM), Tools, World/Environment
 4. **CLI Modes** - Interactive (REPL) vs non-interactive (single prompt)
 5. **User Feedback** - Visual indicators during agent processing
+6. **HTTP Request/Response** - POST, headers, JSON serialization for API calls
+7. **API Structure** - Request bodies, response parsing, error handling
 
 ---
 
