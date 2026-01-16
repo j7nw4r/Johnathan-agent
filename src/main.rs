@@ -6,10 +6,11 @@
 /// Topic 4: HTTP Requests and API Basics
 /// Topic 5: The Anthropic API - system prompts, message history
 /// Topic 6: Streaming Responses - real-time token display
+/// Topic 8: Tool Use / Function Calling
 
 mod api;
 
-use api::Message;
+use api::{Message, Tool};
 use clap::Parser;
 use std::io::{self, Write};
 
@@ -142,11 +143,15 @@ fn eval_streaming(messages: Vec<Message>, api_key: &str, verbose: bool) -> Strin
 
     let mut first_chunk = true;
 
+    // No tools defined yet (Topic 9-10 will add them)
+    let tools: Vec<Tool> = Vec::new();
+
     // Stream response, printing each chunk as it arrives
     let result = api::send_messages_streaming(
         api_key,
         messages,
         Some(SYSTEM_PROMPT),
+        tools,
         |chunk| {
             // Clear "Thinking..." on first chunk
             if first_chunk {

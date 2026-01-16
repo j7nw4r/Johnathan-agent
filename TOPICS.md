@@ -14,7 +14,7 @@ Track our progress through the learning journey. Check off topics as we complete
 - [ ] Topic 7: Async Rust Fundamentals
 
 ## Phase 3: Tool Use (The Heart of Agents)
-- [ ] Topic 8: What is Tool Use / Function Calling?
+- [x] Topic 8: What is Tool Use / Function Calling?
 - [ ] Topic 9: Designing a Tool System
 - [ ] Topic 10: Implementing Core Tools
 - [ ] Topic 11: The Tool Use Loop
@@ -51,6 +51,6 @@ Track our progress through the learning journey. Check off topics as we complete
 
 ## Summary
 - **Total Topics**: 26
-- **Completed**: 6
+- **Completed**: 7
 - **In Progress**: 0
-- **Remaining**: 20
+- **Remaining**: 19

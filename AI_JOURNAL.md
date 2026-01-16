@@ -87,6 +87,9 @@ This journal maintains context across sessions. It serves as the "teacher's memo
 10. **Message Roles** - user/assistant alternation pattern
 11. **Streaming/SSE** - Server-Sent Events for real-time token display
 12. **Callback Pattern** - Process data chunks as they arrive
+13. **Tool Use** - How LLMs request to use tools via structured responses
+14. **Tool Definitions** - JSON Schema for tool inputs
+15. **Tool Results** - Sending execution results back to continue conversation
 
 ---
 
