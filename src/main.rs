@@ -7,12 +7,15 @@
 /// Topic 5: The Anthropic API - system prompts, message history
 /// Topic 6: Streaming Responses - real-time token display
 /// Topic 8: Tool Use / Function Calling
+/// Topic 9: Designing a Tool System
 
 mod api;
+mod tools;
 
-use api::{Message, Tool};
+use api::Message;
 use clap::Parser;
 use std::io::{self, Write};
+use tools::{GetTimeTool, ToolRegistry};
 
 /// System prompt defines the agent's persona and behavior
 const SYSTEM_PROMPT: &str = r#"You are Johnathan, an AI coding assistant.
@@ -51,38 +54,43 @@ fn main() {
         }
     };
 
+    // Set up the tool registry
+    let mut registry = ToolRegistry::new();
+    registry.register(GetTimeTool::new());
+
     if cli.verbose {
         println!("[verbose mode enabled]");
         println!("[API key loaded]");
-        println!("[System prompt: {} chars]\n", SYSTEM_PROMPT.len());
+        println!("[System prompt: {} chars]", SYSTEM_PROMPT.len());
+        println!("[tools registered: {}]\n", registry.definitions().len());
     }
 
     // Two modes: interactive (REPL) or non-interactive (single prompt)
     match cli.prompt {
         Some(prompt) => {
-            run_once(&prompt, &api_key, cli.verbose);
+            run_once(&prompt, &api_key, &registry, cli.verbose);
         }
         None => {
-            run_repl(&api_key, cli.verbose);
+            run_repl(&api_key, &registry, cli.verbose);
         }
     }
 }
 
 /// Non-interactive mode: process a single prompt and exit
-fn run_once(prompt: &str, api_key: &str, verbose: bool) {
+fn run_once(prompt: &str, api_key: &str, registry: &ToolRegistry, verbose: bool) {
     if verbose {
         println!("[non-interactive mode]");
         println!("[prompt: {}]\n", prompt);
     }
 
     let messages = vec![Message::user(prompt)];
-    let response = eval_streaming(messages, api_key, verbose);
+    let response = eval_streaming(messages, api_key, registry, verbose);
     // Response already printed via streaming, just add newline
     println!("\n{}", if verbose { format!("[done: {} chars]", response.len()) } else { String::new() });
 }
 
 /// Interactive mode: the REPL with conversation history
-fn run_repl(api_key: &str, verbose: bool) {
+fn run_repl(api_key: &str, registry: &ToolRegistry, verbose: bool) {
     println!("Type 'quit' or 'exit' to stop.\n");
 
     let mut history: Vec<Message> = Vec::new();
@@ -105,7 +113,7 @@ fn run_repl(api_key: &str, verbose: bool) {
         }
 
         // Get streaming response
-        let response = eval_streaming(history.clone(), api_key, verbose);
+        let response = eval_streaming(history.clone(), api_key, registry, verbose);
 
         // Add assistant response to history
         history.push(Message::assistant(&response));
@@ -136,15 +144,15 @@ fn should_exit(input: &str) -> bool {
 }
 
 /// EVAL with streaming: prints tokens as they arrive
-fn eval_streaming(messages: Vec<Message>, api_key: &str, verbose: bool) -> String {
+fn eval_streaming(messages: Vec<Message>, api_key: &str, registry: &ToolRegistry, verbose: bool) -> String {
     // Show thinking indicator
     print!("Thinking...");
     io::stdout().flush().ok();
 
     let mut first_chunk = true;
 
-    // No tools defined yet (Topic 9-10 will add them)
-    let tools: Vec<Tool> = Vec::new();
+    // Get tool definitions from registry
+    let tools = registry.definitions();
 
     // Stream response, printing each chunk as it arrives
     let result = api::send_messages_streaming(

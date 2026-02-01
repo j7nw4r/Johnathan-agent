@@ -7,6 +7,4 @@
 
 mod client;
 
-pub use client::{
-    send_messages, send_messages_streaming, ChatResponse, Message, Tool, ToolCall,
-};
+pub use client::{send_messages_streaming, ChatResponse, Message, Tool, ToolCall};
