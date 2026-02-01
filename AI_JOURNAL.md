@@ -90,6 +90,8 @@ This journal maintains context across sessions. It serves as the "teacher's memo
 13. **Tool Use** - How LLMs request to use tools via structured responses
 14. **Tool Definitions** - JSON Schema for tool inputs
 15. **Tool Results** - Sending execution results back to continue conversation
+16. **ToolExecutor Trait** - Uniform interface for all tools (name, definition, execute)
+17. **ToolRegistry** - HashMap-based lookup for tools by name
 
 ---
 
@@ -126,4 +128,32 @@ src/
 
 ---
 
-*Last updated: January 15, 2026 - Session 1 (hooks configured)*
+---
+
+### Topic 9 Completed: Designing a Tool System
+
+**Key concepts taught:**
+- ToolExecutor trait as uniform interface for all tools
+- ToolRegistry for tool storage and lookup
+- Separation of concerns: definition vs execution
+- Adding new tools without changing calling code
+
+**Code implemented:**
+- `src/tools/mod.rs` - ToolExecutor trait definition
+- `src/tools/registry.rs` - ToolRegistry with HashMap lookup
+- `src/tools/get_time.rs` - Example tool implementation
+- Updated main.rs to create registry and pass to REPL
+- Created `docs/topics/` with learning files for Topics 1-6, 8-9
+
+**What the user should understand:**
+- Traits provide uniform interfaces for different implementations
+- Registry pattern for dynamic lookup by name
+- The tool system is defined but not yet connected to the agent loop
+
+**Next steps:**
+- Topic 10: Implement real tools (read_file, bash)
+- Topic 11: Complete the tool use loop (execute and return results)
+
+---
+
+*Last updated: February 1, 2026 - Topic 9 complete*
