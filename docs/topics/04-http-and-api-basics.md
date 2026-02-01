@@ -1,176 +1,206 @@
 # Topic 4: HTTP Requests and API Basics
 
-## The Concept
+## 1. Present
 
-To use an LLM, we need to communicate with it over HTTP. This topic covers:
+To make an agent intelligent, we need to send messages to an LLM and get responses. This happens over HTTP - the same protocol your browser uses.
 
-- How HTTP requests work (POST, headers, body)
-- JSON serialization/deserialization
-- Making requests with the `reqwest` crate
-- Handling responses and errors
+Understanding HTTP is essential because:
+- Every LLM API (Claude, OpenAI, etc.) uses HTTP
+- Tool implementations often need HTTP (web search, APIs)
+- Debugging agent issues often means understanding HTTP requests/responses
 
-## HTTP Fundamentals for APIs
+This is where the agent gets its "brain."
 
-Most LLM APIs use this pattern:
+---
 
-```
-POST /v1/messages HTTP/1.1
-Host: api.anthropic.com
-Content-Type: application/json
-x-api-key: sk-ant-...
+## 2. Relate
 
-{
-  "model": "claude-sonnet-4-20250514",
-  "messages": [{"role": "user", "content": "Hello"}],
-  "max_tokens": 1024
+The `eval()` function was a stub:
+
+```rust
+fn eval(input: &str, verbose: bool) -> String {
+    print!("Thinking...");
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    format!("[Echo] {}", input)  // <-- This becomes an API call
 }
 ```
 
-Key parts:
-- **POST** - We're sending data, not just requesting
-- **Headers** - Authentication and content type
-- **Body** - JSON with our request details
+We replace the sleep and echo with a real HTTP request to Claude's API.
 
-## Dependencies
+---
 
-```toml
-# Cargo.toml
-[dependencies]
-reqwest = { version = "0.11", features = ["blocking", "json"] }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+## 3. Explain
+
+### The HTTP Request/Response Cycle
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    HTTP Cycle                           │
+│                                                         │
+│  Agent                                    Claude API    │
+│    │                                           │        │
+│    │──── POST /v1/messages ──────────────────▶│        │
+│    │     Headers: Authorization, Content-Type │        │
+│    │     Body: { messages, model, ... }       │        │
+│    │                                           │        │
+│    │◀─── 200 OK ─────────────────────────────│        │
+│    │     Body: { content, stop_reason, ... }  │        │
+│    │                                           │        │
+└─────────────────────────────────────────────────────────┘
 ```
 
-- `reqwest` - HTTP client
-- `serde` - Serialization framework
-- `serde_json` - JSON support
+### Key Concepts
 
-## Code Implementation
+**HTTP Methods:**
+- `GET` - retrieve data (read-only)
+- `POST` - send data to create/process something (what we use for LLM APIs)
 
-### Request/Response Types
+**Headers:** Metadata about the request
+- `x-api-key: sk-ant-...` - your API key
+- `anthropic-version: 2023-06-01` - API version
+- `content-type: application/json` - we're sending JSON
+
+**Request Body:** The actual data (JSON for Claude API)
+```json
+{
+  "model": "claude-sonnet-4-20250514",
+  "max_tokens": 1024,
+  "messages": [
+    {"role": "user", "content": "Hello!"}
+  ]
+}
+```
+
+**Response:** What comes back
+```json
+{
+  "content": [{"type": "text", "text": "Hello! How can I help?"}],
+  "stop_reason": "end_turn",
+  "usage": {"input_tokens": 10, "output_tokens": 15}
+}
+```
+
+### Why JSON?
+
+JSON is the universal language of APIs:
+- Human readable
+- Easy to parse in any language
+- Maps naturally to data structures (objects, arrays)
+
+The flow: **Rust struct → serialize to JSON → HTTP → JSON response → deserialize to Rust struct**
+
+---
+
+## 4. Implement
+
+**Cargo.toml:**
+```toml
+[dependencies]
+reqwest = { version = "0.12", features = ["blocking", "json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+```
+
+**src/api/client.rs:**
 
 ```rust
 use serde::{Deserialize, Serialize};
 
-// What we send to the API
-#[derive(Debug, Serialize)]
-struct ApiRequest {
-    model: String,
-    max_tokens: u32,
-    messages: Vec<Message>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    system: Option<String>,
-}
-
-// What we get back (simplified)
-#[derive(Debug, Deserialize)]
-struct ApiResponse {
-    content: Vec<ContentBlock>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ContentBlock {
-    text: String,
-}
-```
-
-The `#[derive(Serialize)]` and `#[derive(Deserialize)]` macros auto-generate JSON conversion code.
-
-### Making the Request
-
-```rust
 const API_URL: &str = "https://api.anthropic.com/v1/messages";
 const API_VERSION: &str = "2023-06-01";
 
-pub fn send_messages(
-    api_key: &str,
-    messages: Vec<Message>,
-    system_prompt: Option<&str>,
-) -> Result<String, String> {
-    // Build request body
-    let request = ApiRequest {
-        model: "claude-sonnet-4-20250514".to_string(),
-        max_tokens: 4096,
-        messages,
-        system: system_prompt.map(|s| s.to_string()),
-    };
-
-    // Create HTTP client and send
-    let client = reqwest::blocking::Client::new();
-    let response = client
-        .post(API_URL)
-        .header("x-api-key", api_key)
-        .header("anthropic-version", API_VERSION)
-        .header("content-type", "application/json")
-        .json(&request)  // Serializes to JSON automatically
-        .send()
-        .map_err(|e| format!("HTTP request failed: {}", e))?;
-
-    // Check for HTTP errors
-    if !response.status().is_success() {
-        let status = response.status();
-        let body = response.text().unwrap_or_default();
-        return Err(format!("API error {}: {}", status, body));
-    }
-
-    // Parse JSON response
-    let api_response: ApiResponse = response
-        .json()
-        .map_err(|e| format!("Failed to parse response: {}", e))?;
-
-    // Extract text from first content block
-    Ok(api_response.content
-        .first()
-        .map(|c| c.text.clone())
-        .unwrap_or_default())
-}
-```
-
-### Message Types
-
-```rust
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Message {
     pub role: String,
     pub content: String,
 }
 
-impl Message {
-    pub fn user(text: &str) -> Self {
-        Self {
+#[derive(Debug, Serialize)]
+struct ApiRequest {
+    model: String,
+    max_tokens: u32,
+    messages: Vec<Message>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ApiResponse {
+    content: Vec<ContentBlock>,
+    stop_reason: Option<String>,
+}
+
+pub fn send_message(api_key: &str, user_message: &str) -> Result<String, String> {
+    // 1. Build request
+    let request = ApiRequest {
+        model: "claude-sonnet-4-20250514".to_string(),
+        max_tokens: 1024,
+        messages: vec![Message {
             role: "user".to_string(),
-            content: text.to_string(),
-        }
+            content: user_message.to_string(),
+        }],
+    };
+
+    // 2. Send HTTP POST
+    let client = reqwest::blocking::Client::new();
+    let response = client
+        .post(API_URL)
+        .header("x-api-key", api_key)
+        .header("anthropic-version", API_VERSION)
+        .header("content-type", "application/json")
+        .json(&request)
+        .send()
+        .map_err(|e| format!("HTTP request failed: {}", e))?;
+
+    // 3. Check status
+    if !response.status().is_success() {
+        return Err(format!("API error {}", response.status()));
     }
 
-    pub fn assistant(text: &str) -> Self {
-        Self {
-            role: "assistant".to_string(),
-            content: text.to_string(),
-        }
-    }
+    // 4. Parse JSON
+    let api_response: ApiResponse = response.json()?;
+
+    // 5. Extract text
+    let text = api_response.content
+        .iter()
+        .filter_map(|block| block.text.clone())
+        .collect::<Vec<_>>()
+        .join("");
+
+    Ok(text)
 }
 ```
 
-## Error Handling Pattern
+---
 
-We use `Result<T, String>` for simplicity, converting errors to readable messages:
+## 5. Review
 
-```rust
-.send()
-.map_err(|e| format!("HTTP request failed: {}", e))?;
+**The HTTP flow in our agent:**
+
+```
+eval()
+└── api::send_message(api_key, input)
+    ├── Build ApiRequest struct
+    ├── Serialize to JSON
+    ├── POST to https://api.anthropic.com/v1/messages
+    │   └── Headers: x-api-key, anthropic-version, content-type
+    ├── Check response.status()
+    ├── Deserialize JSON → ApiResponse
+    └── Extract text from content blocks
 ```
 
-The `?` operator propagates errors up the call stack.
+**Agent concepts demonstrated:**
+
+| Concept | Why It Matters |
+|---------|----------------|
+| HTTP POST | LLM APIs receive data, not just retrieve it |
+| Headers | Authentication and versioning |
+| JSON serialization | Convert between code structures and wire format |
+| Error handling | Network calls fail; handle gracefully |
+
+---
 
 ## Key Takeaways
 
-1. **POST with JSON** - LLM APIs receive JSON, return JSON
-2. **Headers matter** - API key and version are required
-3. **Serde derives** - `Serialize`/`Deserialize` auto-generate JSON code
-4. **Result for errors** - Propagate errors with `?`, convert with `map_err`
-5. **Blocking client** - We use sync HTTP for simplicity (async comes later)
-
-## What's Next
-
-Topic 5 dives deeper into the Anthropic API structure, covering system prompts and proper message history management.
+- LLM APIs use HTTP POST with JSON bodies
+- Headers carry authentication and metadata
+- Serialize structs to JSON, deserialize responses back
+- Always handle network errors gracefully

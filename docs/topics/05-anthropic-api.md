@@ -1,69 +1,116 @@
 # Topic 5: The Anthropic API
 
-## The Concept
+## 1. Present
 
-The Anthropic API has specific conventions for conversations:
+Topic 4 covered the HTTP mechanics. Now we go deeper into **what** we're sending - the structure of the Anthropic Messages API.
 
-- **System prompts** define the AI's persona and rules
-- **Message history** maintains conversation context
-- **Role alternation** enforces user/assistant turn-taking
+Key concepts:
+- **System prompts** - Instructions that shape the assistant's behavior
+- **Message history** - Multi-turn conversations, not just single exchanges
+- **Roles** - User, assistant, and how they alternate
+- **Stop reasons** - Why did the model stop generating?
 
-## System Prompts
+This is where we give our agent its personality and memory.
 
-A system prompt tells Claude *who it is* and *how to behave*:
+---
 
+## 2. Relate
+
+The initial implementation sent single messages:
 ```rust
-const SYSTEM_PROMPT: &str = r#"You are Johnathan, an AI coding assistant.
-
-You help users with programming tasks. Be concise and direct.
-When asked to perform tasks, explain what you're doing briefly.
-
-You are running as a CLI agent and can have multi-turn conversations."#;
+messages: vec![Message {
+    role: "user".to_string(),
+    content: user_message.to_string(),
+}]
 ```
 
-System prompts are sent with every request but aren't part of the message history—they're a separate field:
+No system prompt. No history. Every message is a fresh start - the agent has amnesia.
+
+We need to:
+1. Add system prompt support
+2. Maintain conversation history across turns
+3. Handle the assistant's responses properly
+
+---
+
+## 3. Explain
+
+### The Messages API Structure
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                 API Request Structure                   │
+│                                                         │
+│  {                                                      │
+│    "model": "claude-sonnet-4-20250514",                │
+│    "max_tokens": 1024,                                  │
+│    "system": "You are a helpful assistant...",  ←─┐    │
+│    "messages": [                                    │    │
+│      {"role": "user", "content": "Hi"},            │    │
+│      {"role": "assistant", "content": "Hello!"},   │    │
+│      {"role": "user", "content": "How are you?"}   │    │
+│    ]                                                │    │
+│  }                                                  │    │
+│                                          System prompt  │
+│                                          (optional but  │
+│                                           important)    │
+└─────────────────────────────────────────────────────────┘
+```
+
+### System Prompts
+
+The system prompt sets the **persona and rules** for the assistant:
 
 ```json
 {
-  "model": "claude-sonnet-4-20250514",
-  "system": "You are Johnathan...",
-  "messages": [...]
+  "system": "You are Johnathan, an AI coding assistant. You help users with programming tasks. Be concise and direct."
 }
 ```
 
-## Message History and Roles
+System prompts are:
+- Not part of the message array
+- Sent with every request
+- Where you define behavior, constraints, and personality
 
-### The Stateless API
+### Message Roles
 
-LLM APIs don't maintain sessions. Each request must include the full conversation:
+Messages alternate between two roles:
+
+| Role | Who | Purpose |
+|------|-----|---------|
+| `user` | Human | Questions, requests, feedback |
+| `assistant` | Claude | Responses, including tool calls |
+
+**Rule:** Messages must alternate. You can't have two user messages in a row.
+
+### Conversation History
+
+For multi-turn conversations, you send the **entire history** each time:
 
 ```
-Request 1: [user: "Hi"]
-Response 1: "Hello!"
-
-Request 2: [user: "Hi", assistant: "Hello!", user: "What's 2+2?"]
-Response 2: "4"
-
-Request 3: [user: "Hi", assistant: "Hello!", user: "What's 2+2?", assistant: "4", user: "Double it"]
-Response 3: "8"
+Turn 1: [user: "Hi"]
+Turn 2: [user: "Hi", assistant: "Hello!", user: "What's 2+2?"]
+Turn 3: [user: "Hi", assistant: "Hello!", user: "What's 2+2?", assistant: "4", user: "Thanks"]
 ```
 
-### Role Alternation
+The API is **stateless** - it doesn't remember previous calls. Your agent must maintain and send the history.
 
-Anthropic requires strict alternation between `user` and `assistant` roles:
+### Stop Reasons
 
-```
-✓ user → assistant → user → assistant
-✗ user → user (error!)
-✗ assistant → assistant (error!)
-```
+The response includes why Claude stopped:
 
-This means after every assistant response, we must wait for user input before sending another request.
+| Stop Reason | Meaning |
+|-------------|---------|
+| `end_turn` | Natural completion |
+| `max_tokens` | Hit the token limit |
+| `tool_use` | Wants to use a tool (Topic 8) |
+| `stop_sequence` | Hit a custom stop sequence |
 
-## Code Implementation
+---
 
-### Sending System Prompt
+## 4. Implement
 
+**Updated ApiRequest with system prompt:**
 ```rust
 #[derive(Debug, Serialize)]
 struct ApiRequest {
@@ -71,14 +118,41 @@ struct ApiRequest {
     max_tokens: u32,
     messages: Vec<Message>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    system: Option<String>,  // System prompt goes here, separate from messages
+    system: Option<String>,
 }
 ```
 
-The `#[serde(skip_serializing_if = "Option::is_none")]` prevents sending `"system": null` when there's no system prompt.
+**Message constructors:**
+```rust
+impl Message {
+    pub fn user(content: &str) -> Self {
+        Self { role: "user".to_string(), content: content.to_string() }
+    }
 
-### Maintaining History in REPL
+    pub fn assistant(content: &str) -> Self {
+        Self { role: "assistant".to_string(), content: content.to_string() }
+    }
+}
+```
 
+**Full-featured send function:**
+```rust
+pub fn send_messages(
+    api_key: &str,
+    messages: Vec<Message>,
+    system_prompt: Option<&str>,
+) -> Result<ChatResponse, String> {
+    let request = ApiRequest {
+        model: "claude-sonnet-4-20250514".to_string(),
+        max_tokens: 4096,
+        messages,
+        system: system_prompt.map(|s| s.to_string()),
+    };
+    // ... HTTP call ...
+}
+```
+
+**REPL with history:**
 ```rust
 fn run_repl(api_key: &str, verbose: bool) {
     let mut history: Vec<Message> = Vec::new();
@@ -86,72 +160,64 @@ fn run_repl(api_key: &str, verbose: bool) {
     loop {
         let input = read_input()?;
 
-        // Add user message
+        // Add user message to history
         history.push(Message::user(&input));
 
-        // Send full history to API
-        let response = send_messages(
-            api_key,
-            history.clone(),      // Clone because we need to keep original
-            Some(SYSTEM_PROMPT),
-        )?;
+        // Get response with full history
+        let response = eval(history.clone(), api_key, verbose);
 
         // Add assistant response to history
         history.push(Message::assistant(&response));
 
-        println!("{}", response);
+        println!("{}\n", response);
     }
 }
 ```
 
-### Non-Interactive Mode (Single Turn)
+---
 
-For one-shot queries, history is just one message:
+## 5. Review
 
-```rust
-fn run_once(prompt: &str, api_key: &str) {
-    let messages = vec![Message::user(prompt)];
-    let response = send_messages(api_key, messages, Some(SYSTEM_PROMPT));
-    println!("{}", response);
-}
+**What we built:**
+
+```
+main.rs
+├── SYSTEM_PROMPT constant      # Agent's persona
+├── run_once()                  # Single message, no history
+└── run_repl()
+    ├── history: Vec<Message>   # Persists across turns
+    ├── history.push(user)      # Add user message
+    ├── eval(history.clone())   # Send full history
+    └── history.push(assistant) # Add response
+
+api/client.rs
+├── Message::user()             # Constructor helpers
+├── Message::assistant()
+├── send_messages()             # Full API: history + system prompt
+└── send_message()              # Convenience wrapper
 ```
 
-## Best Practices
-
-### System Prompt Design
-
-Good system prompts:
-- Define the persona clearly
-- Set behavioral boundaries
-- Mention capabilities and limitations
-- Are concise (tokens cost money)
-
-```rust
-// Good: Clear, specific, concise
-"You are a coding assistant. Be direct. Explain briefly what you do."
-
-// Bad: Vague, verbose
-"You are a helpful AI assistant who tries to help users with
-various tasks and always aims to be as helpful as possible..."
+**The conversation flow:**
+```
+Turn 1: [user: "Hi"] → API → "Hello!"
+Turn 2: [user: "Hi", assistant: "Hello!", user: "My name is Bob"] → API
+Turn 3: [..., user: "What's my name?"] → API → "Your name is Bob"
 ```
 
-### History Management
+**Agent concepts demonstrated:**
 
-For long conversations, history grows and:
-- Uses more tokens (costs more)
-- May hit context limits
-- Slows down responses
+| Concept | Implementation |
+|---------|----------------|
+| System prompt | `SYSTEM_PROMPT` constant, passed with every request |
+| Message history | `Vec<Message>` in REPL, grows each turn |
+| Stateless API | We maintain state, API receives full history each call |
+| Stop reason | `ChatResponse.stop_reason` - will matter for tool use |
 
-Topic 14 covers strategies for managing this (summarization, truncation).
+---
 
 ## Key Takeaways
 
-1. **System prompt = persona** - Separate from messages, sent every request
-2. **History = context** - Full conversation sent each time (stateless API)
-3. **Role alternation** - Must alternate user/assistant
-4. **Clone history** - Don't consume it when sending, you need it for next turn
-5. **Design prompts carefully** - Clear, specific, concise
-
-## What's Next
-
-Topic 6 adds streaming responses, showing tokens as they arrive instead of waiting for the full response.
+- System prompts define agent persona and rules
+- The API is stateless - you must send full conversation history
+- Messages must alternate between user and assistant roles
+- Stop reasons tell you why the model stopped (important for tool use later)

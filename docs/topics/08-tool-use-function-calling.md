@@ -1,291 +1,214 @@
 # Topic 8: What is Tool Use / Function Calling?
 
-## The Concept
+## 1. Present
 
-Tool use (also called function calling) is what transforms a chatbot into an agent. Instead of just generating text, the LLM can request to **use tools** that interact with the real world.
+Up until now, our agent can only **talk**. It receives input, thinks, and responds with text. But real agents can **act** - read files, run commands, search the web.
+
+**Tool use** (also called function calling) is the mechanism that enables this:
+1. You tell the model what tools exist
+2. The model can request to use a tool instead of (or before) responding
+3. Your agent executes the tool
+4. You send the result back to the model
+5. The model continues (maybe using more tools, or giving a final answer)
+
+This is what separates a chatbot from an agent.
+
+---
+
+## 2. Relate
+
+Remember our original agent loop from Topic 1?
 
 ```
-Without tools:         With tools:
-User: "Read foo.txt"   User: "Read foo.txt"
-LLM: "I can't access   LLM: [tool_use: read_file("foo.txt")]
-      your files..."   Agent: [executes, returns contents]
-                       LLM: "The file contains..."
+while goal_not_achieved:
+    observe()   ← User input OR tool result
+    think()     ← LLM decides: respond OR use tool
+    act()       ← Execute the tool
 ```
 
-## How It Works
+Tool use is what makes `act()` real. The LLM's response isn't just text - it can be a **tool request**.
 
-### 1. Define Available Tools
+---
 
-We tell Claude what tools exist and how to use them:
+## 3. Explain
+
+### The Tool Use Flow
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│                      TOOL USE LOOP                             │
+│                                                                │
+│  User: "What's in main.rs?"                                    │
+│           │                                                    │
+│           ▼                                                    │
+│  ┌─────────────────┐                                           │
+│  │ Agent sends to  │  messages: [user: "What's in main.rs?"]   │
+│  │ Claude API with │  tools: [read_file, write_file, ...]      │
+│  │ tool definitions│                                           │
+│  └────────┬────────┘                                           │
+│           ▼                                                    │
+│  ┌─────────────────┐                                           │
+│  │ Claude responds │  "I'll read that file for you"            │
+│  │ with tool_use   │  tool_use: {name: "read_file",            │
+│  │                 │            input: {path: "main.rs"}}      │
+│  └────────┬────────┘                                           │
+│           ▼                                                    │
+│  ┌─────────────────┐                                           │
+│  │ Agent executes  │  → Actually reads main.rs                 │
+│  │ the tool        │  → Gets file contents                     │
+│  └────────┬────────┘                                           │
+│           ▼                                                    │
+│  ┌─────────────────┐                                           │
+│  │ Agent sends     │  messages: [..., tool_result: contents]   │
+│  │ result back     │                                           │
+│  └────────┬────────┘                                           │
+│           ▼                                                    │
+│  ┌─────────────────┐                                           │
+│  │ Claude continues│  "The file contains a main function..."   │
+│  │ with final      │                                           │
+│  │ response        │                                           │
+│  └─────────────────┘                                           │
+└────────────────────────────────────────────────────────────────┘
+```
+
+### Tool Definition Schema
+
+Tools are defined with JSON Schema:
 
 ```json
 {
-  "tools": [
-    {
-      "name": "read_file",
-      "description": "Read the contents of a file",
-      "input_schema": {
-        "type": "object",
-        "properties": {
-          "path": {
-            "type": "string",
-            "description": "Path to the file"
-          }
-        },
-        "required": ["path"]
+  "name": "read_file",
+  "description": "Read the contents of a file at the given path",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "path": {
+        "type": "string",
+        "description": "The path to the file to read"
       }
-    }
-  ]
+    },
+    "required": ["path"]
+  }
 }
 ```
 
-### 2. Claude Decides to Use a Tool
+Key parts:
+- **name**: Identifier the model uses to call it
+- **description**: Helps the model know *when* to use it
+- **input_schema**: What parameters it accepts
 
-When Claude determines a tool would help, it responds with a `tool_use` block:
+### The Response Changes
 
+Without tools:
 ```json
-{
-  "content": [
-    {
-      "type": "tool_use",
-      "id": "toolu_01ABC123",
-      "name": "read_file",
-      "input": {"path": "foo.txt"}
-    }
-  ],
-  "stop_reason": "tool_use"
-}
+{"type": "text", "text": "Hello!"}
 ```
 
-Note: `stop_reason` is `"tool_use"`, not `"end_turn"`.
+With tools:
+```json
+{"type": "tool_use", "id": "tool_123", "name": "read_file", "input": {"path": "main.rs"}}
+```
 
-### 3. Agent Executes and Returns Result
+The `stop_reason` tells you what happened:
+- `end_turn` - Model finished with text
+- `tool_use` - Model wants to use a tool
 
-We execute the tool and send the result back:
+### Tool Results
+
+After executing, send the result back:
 
 ```json
 {
   "role": "user",
-  "content": [
-    {
-      "type": "tool_result",
-      "tool_use_id": "toolu_01ABC123",
-      "content": "Contents of foo.txt:\nHello, world!"
-    }
-  ]
+  "content": [{
+    "type": "tool_result",
+    "tool_use_id": "tool_123",
+    "content": "fn main() { ... }"
+  }]
 }
 ```
 
-### 4. Claude Continues
+---
 
-Claude receives the result and can now respond (or use more tools):
+## 4. Implement
 
-```json
-{
-  "content": [
-    {
-      "type": "text",
-      "text": "The file foo.txt contains a simple greeting: 'Hello, world!'"
-    }
-  ],
-  "stop_reason": "end_turn"
-}
-```
-
-## Code Implementation
-
-### Tool Definition Structure
-
+**Tool struct:**
 ```rust
-// src/api/client.rs
-
-#[derive(Debug, Serialize, Clone)]
 pub struct Tool {
     pub name: String,
     pub description: String,
     pub input_schema: Value,  // JSON Schema
 }
-
-impl Tool {
-    pub fn new(name: &str, description: &str, input_schema: Value) -> Self {
-        Self {
-            name: name.to_string(),
-            description: description.to_string(),
-            input_schema,
-        }
-    }
-}
 ```
 
-### Representing Tool Calls
-
+**ToolCall (parsed from response):**
 ```rust
-/// A tool call requested by Claude
-#[derive(Debug, Clone)]
 pub struct ToolCall {
-    pub id: String,      // Unique ID to match with result
-    pub name: String,    // Which tool to use
-    pub input: Value,    // Arguments as JSON
+    pub id: String,
+    pub name: String,
+    pub input: Value,
 }
 ```
 
-### Content Blocks (Text and Tool Use)
-
-Messages can contain multiple content blocks:
-
+**Content blocks for messages:**
 ```rust
-#[derive(Debug, Serialize, Deserialize, Clone)]
-#[serde(tag = "type")]
 pub enum ContentBlock {
-    #[serde(rename = "text")]
     Text { text: String },
-
-    #[serde(rename = "tool_use")]
-    ToolUse {
-        id: String,
-        name: String,
-        input: Value,
-    },
-
-    #[serde(rename = "tool_result")]
-    ToolResult {
-        tool_use_id: String,
-        content: String,
-    },
+    ToolUse { id: String, name: String, input: Value },
+    ToolResult { tool_use_id: String, content: String },
 }
 ```
 
-### Updated Message Type
-
-Messages now support both simple text and content blocks:
-
-```rust
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct Message {
-    pub role: String,
-    #[serde(flatten)]
-    pub content: MessageContent,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-#[serde(untagged)]
-pub enum MessageContent {
-    Text { content: String },
-    Blocks { content: Vec<ContentBlock> },
-}
-```
-
-### Constructing Tool Result Messages
-
-```rust
-impl Message {
-    /// Create a user message with tool results
-    pub fn tool_results(results: Vec<(String, String)>) -> Self {
-        let blocks: Vec<ContentBlock> = results
-            .into_iter()
-            .map(|(tool_use_id, content)| ContentBlock::ToolResult {
-                tool_use_id,
-                content,
-            })
-            .collect();
-
-        Self {
-            role: "user".to_string(),
-            content: MessageContent::Blocks { content: blocks },
-        }
-    }
-}
-```
-
-### Parsing Tool Use from Stream
-
-Tool inputs arrive as streamed JSON:
-
-```rust
-// Track tool being built
-let mut current_tool_id: Option<String> = None;
-let mut current_tool_name: Option<String> = None;
-let mut current_tool_json = String::new();
-
-// On content_block_start with type "tool_use"
-if block.block_type == "tool_use" {
-    current_tool_id = block.id;
-    current_tool_name = block.name;
-    current_tool_json.clear();
-}
-
-// On content_block_delta with partial_json
-if let Some(json) = delta.partial_json {
-    current_tool_json.push_str(&json);
-}
-
-// On content_block_stop - finalize the tool call
-if let (Some(id), Some(name)) = (current_tool_id.take(), current_tool_name.take()) {
-    let input: Value = serde_json::from_str(&current_tool_json)?;
-    tool_calls.push(ToolCall { id, name, input });
-}
-```
-
-### Updated Response Structure
-
+**ChatResponse now includes tool_calls:**
 ```rust
 pub struct ChatResponse {
-    pub text: String,              // Any text content
-    pub stop_reason: String,       // "end_turn" or "tool_use"
-    pub tool_calls: Vec<ToolCall>, // Requested tool uses
-}
-
-impl ChatResponse {
-    pub fn has_tool_calls(&self) -> bool {
-        !self.tool_calls.is_empty()
-    }
+    pub text: String,
+    pub stop_reason: String,
+    pub tool_calls: Vec<ToolCall>,
 }
 ```
 
-## The Tool Use Loop
+**Message helpers:**
+```rust
+// For history: record that assistant used tools
+Message::assistant_tool_use(&tool_calls)
 
-This creates a new loop pattern:
+// For results: send tool outputs back
+Message::tool_results(vec![
+    (tool_id, result_string),
+])
+```
 
+---
+
+## 5. Review
+
+**The key structures:**
+
+| Type | Purpose |
+|------|---------|
+| `Tool` | Definition sent to API |
+| `ToolCall` | Parsed request from Claude |
+| `ContentBlock::ToolResult` | How you send results back |
+| `stop_reason: "tool_use"` | Signals tool execution needed |
+
+**The flow:**
 ```
-┌─────────────────────────────────────────────┐
-│                                             │
-│   User Input                                │
-│       │                                     │
-│       ▼                                     │
-│   Send to Claude (with tools)               │
-│       │                                     │
-│       ▼                                     │
-│   ┌─────────────────┐                       │
-│   │ Check stop_reason│                      │
-│   └────────┬────────┘                       │
-│            │                                │
-│    ┌───────┴───────┐                        │
-│    │               │                        │
-│    ▼               ▼                        │
-│ "end_turn"    "tool_use"                    │
-│    │               │                        │
-│    ▼               ▼                        │
-│  Done         Execute tools                 │
-│                    │                        │
-│                    ▼                        │
-│              Send results ───────────┐      │
-│                                      │      │
-│                    ┌─────────────────┘      │
-│                    │                        │
-│                    ▼                        │
-│              Back to Claude ────────────────┘
-│                                             │
-└─────────────────────────────────────────────┘
+1. Define tools: Vec<Tool>
+2. Send with messages to API
+3. If response.has_tool_calls():
+   a. Execute each tool
+   b. Build tool_results message
+   c. Add to history
+   d. Call API again
+4. When stop_reason == "end_turn", done
 ```
+
+---
 
 ## Key Takeaways
 
-1. **Tools = actions** - Transform LLM from advisor to actor
-2. **JSON Schema** - Tools defined with structured input schemas
-3. **Tool IDs** - Match tool_use to tool_result
-4. **stop_reason** - Tells us if Claude wants to use tools or is done
-5. **Loop required** - Tool use often requires multiple round-trips
-
-## What's Next
-
-Topic 9 designs the tool system—the `ToolExecutor` trait and `ToolRegistry` that let us define and manage tools in our codebase.
+- Tools transform an LLM from advisor to actor
+- Tool definitions use JSON Schema for structured input
+- The agent loop becomes: ask → (tool call → execute → return result)* → final answer
+- `stop_reason` tells you whether to execute tools or display response

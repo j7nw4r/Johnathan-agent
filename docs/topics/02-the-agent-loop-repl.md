@@ -1,59 +1,109 @@
 # Topic 2: The Agent Loop (REPL Pattern)
 
-## The Concept
+## 1. Present
 
-A REPL is a classic pattern in programming: **Read-Eval-Print-Loop**. It's how interactive interpreters work (Python, Node, etc.), and it maps perfectly to our agent loop:
+REPL stands for **Read-Eval-Print-Loop**. It's the pattern behind every interactive shell you've used:
+- Python interpreter
+- Node.js console
+- Bash itself
+- And every agent CLI
 
-| REPL Step | Agent Step | What Happens |
-|-----------|------------|--------------|
-| **Read**  | Observe    | Get user input |
-| **Eval**  | Think+Act  | Process with LLM, execute tools |
-| **Print** | Report     | Show results to user |
-| **Loop**  | Check      | Continue until exit |
+The agent loop is a specialized REPL where "Eval" involves calling an LLM and potentially executing tools.
 
-## Two Modes of Operation
+---
 
-Our agent supports two modes:
+## 2. Relate
 
-### Interactive Mode (REPL)
-```
-$ johnathan
-> What files are in this directory?
-[agent reads directory, responds]
-> Now create a new file called hello.txt
-[agent creates file, responds]
-> quit
-Goodbye!
-```
-
-The user has a conversation. The agent maintains context across turns.
-
-### Non-Interactive Mode (Single Prompt)
-```
-$ johnathan "What files are in this directory?"
-[agent responds and exits]
-```
-
-For scripting and quick queries. No ongoing conversation.
-
-## Code Implementation
-
-### The REPL Structure
+The initial code had the loop structure but wasn't interactive:
 
 ```rust
-// src/main.rs
+while !goal_achieved {
+    let observation = observe();  // Hardcoded string
+    let thought = think(&observation);
+    let result = act(&thought);
+    break;  // Exits immediately
+}
+```
 
-fn run_repl(api_key: &str, verbose: bool) {
+We need to make this actually read from the user, respond, and continue until they quit.
+
+---
+
+## 3. Explain
+
+### The Classic REPL
+
+```
+┌──────────────────────────────────────┐
+│              REPL                    │
+│                                      │
+│   ┌──────┐                           │
+│   │ READ │◄── User types input       │
+│   └──┬───┘                           │
+│      ▼                               │
+│   ┌──────┐                           │
+│   │ EVAL │◄── Process the input      │
+│   └──┬───┘                           │
+│      ▼                               │
+│   ┌───────┐                          │
+│   │ PRINT │◄── Show the result       │
+│   └──┬────┘                          │
+│      ▼                               │
+│   ┌──────┐                           │
+│   │ LOOP │◄── Go back to READ        │
+│   └──────┘                           │
+└──────────────────────────────────────┘
+```
+
+### The Agent REPL (more complex)
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    AGENT LOOP                           │
+│                                                         │
+│   ┌──────┐                                              │
+│   │ READ │◄── User input OR tool result                 │
+│   └──┬───┘                                              │
+│      ▼                                                  │
+│   ┌──────┐    ┌─────────────────┐                       │
+│   │ EVAL │───▶│ Call LLM        │                       │
+│   └──┬───┘    │ Parse response  │                       │
+│      │        │ Extract action  │                       │
+│      │        └─────────────────┘                       │
+│      ▼                                                  │
+│   ┌───────┐   Was it a tool call?                       │
+│   │ PRINT │   ├─ Yes: Execute tool, feed result back   │
+│   └──┬────┘   └─ No: Show response to user             │
+│      ▼                                                  │
+│   ┌──────┐                                              │
+│   │ LOOP │◄── Continue until user quits                 │
+│   └──────┘                                              │
+└─────────────────────────────────────────────────────────┘
+```
+
+The key difference: the agent loop has an **inner loop** for tool execution. The LLM might request multiple tools before giving a final response.
+
+### Why This Matters
+
+Without the loop, you'd have to manually copy-paste between the LLM and your terminal. The loop automates this back-and-forth, making the agent autonomous.
+
+---
+
+## 4. Implement
+
+```rust
+use std::io::{self, Write};
+
+fn main() {
+    println!("Johnathan Agent v0.1.0");
     println!("Type 'quit' or 'exit' to stop.\n");
 
-    // Message history persists across the loop
-    let mut history: Vec<Message> = Vec::new();
-
+    // THE AGENT LOOP (REPL Pattern)
     loop {
-        // READ: Get user input
+        // 1. READ - Get input from the user
         let input = match read_input() {
             Some(input) => input,
-            None => continue,  // Empty input, try again
+            None => continue,
         };
 
         // Check for exit commands
@@ -62,98 +112,72 @@ fn run_repl(api_key: &str, verbose: bool) {
             break;
         }
 
-        // Add user message to history
-        history.push(Message::user(&input));
+        // 2. EVAL - Process the input (later: send to LLM)
+        let response = eval(&input);
 
-        // EVAL: Send to LLM and get response
-        let response = eval(history.clone(), api_key);
-
-        // Add assistant response to history (for context in next turn)
-        history.push(Message::assistant(&response));
-
-        // PRINT: Display the response
+        // 3. PRINT - Show the result
         println!("{}\n", response);
 
-        // LOOP: Continue (implicit via loop {})
+        // 4. LOOP - automatically continues
     }
 }
-```
 
-### Reading Input
-
-```rust
 fn read_input() -> Option<String> {
-    // Show prompt
     print!("> ");
     io::stdout().flush().ok()?;
 
-    // Read line from stdin
     let mut input = String::new();
     io::stdin().read_line(&mut input).ok()?;
 
-    // Return trimmed input, or None if empty
     let trimmed = input.trim().to_string();
-    if trimmed.is_empty() {
-        None
-    } else {
-        Some(trimmed)
-    }
+    if trimmed.is_empty() { None } else { Some(trimmed) }
 }
-```
 
-### Exit Detection
-
-```rust
 fn should_exit(input: &str) -> bool {
     let lower = input.to_lowercase();
     lower == "quit" || lower == "exit" || lower == "q"
 }
-```
 
-## Message History
-
-A critical concept: **LLM APIs are stateless**. Each request must include the full conversation history. This is why we maintain `history: Vec<Message>`:
-
-```
-Turn 1:
-  User: "What's 2+2?"
-  Send: [user: "What's 2+2?"]
-  Recv: "4"
-
-Turn 2:
-  User: "Double that"
-  Send: [user: "What's 2+2?", assistant: "4", user: "Double that"]
-  Recv: "8"
-```
-
-Without history, the LLM wouldn't know what "that" refers to.
-
-## Visual Feedback
-
-Users need to know the agent is working:
-
-```rust
-fn eval(messages: Vec<Message>, api_key: &str) -> String {
-    // Show that we're processing
-    print!("Thinking...");
-    io::stdout().flush().ok();
-
-    // ... make API call ...
-
-    // Clear the indicator
-    print!("\r            \r");
-
-    // Return response
+fn eval(input: &str) -> String {
+    // Future: call LLM, handle tool use
+    format!("[Echo] You said: {}", input)
 }
 ```
 
+---
+
+## 5. Review
+
+Structure:
+
+```
+main()
+└── loop                    <-- Infinite loop (the REPL)
+    ├── read_input()        <-- READ: get user input
+    ├── should_exit()       <-- Check for quit
+    ├── eval()              <-- EVAL: process (currently echoes)
+    └── println!()          <-- PRINT: show result
+```
+
+**The roadmap for `eval()`:**
+
+```rust
+// 1. Add user message to conversation history
+// 2. Send history to LLM
+// 3. Get response
+// 4. If response contains tool call:
+//    a. Execute tool
+//    b. Add tool result to history
+//    c. Go back to step 2 (inner loop!)
+// 5. Return final text response
+```
+
+That inner loop (steps 4a-4c) is what makes an agent different from a simple chatbot.
+
+---
+
 ## Key Takeaways
 
-1. **REPL maps to agent loop** - Read=Observe, Eval=Think+Act, Print=Report
-2. **History is essential** - LLM APIs are stateless; we maintain context
-3. **Two modes** - Interactive for conversations, non-interactive for scripts
-4. **User feedback matters** - Show the user something is happening
-
-## What's Next
-
-Topic 3 adds proper CLI argument parsing with clap, making our two modes accessible via command-line flags.
+- REPL = Read-Eval-Print-Loop
+- The agent loop has an inner loop for tool execution
+- Without the loop, you'd manually copy-paste between LLM and terminal

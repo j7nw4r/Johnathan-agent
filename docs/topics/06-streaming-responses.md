@@ -1,190 +1,199 @@
 # Topic 6: Streaming Responses
 
-## The Concept
+## 1. Present
 
-Without streaming, the user sees nothing while the LLM generates a response—potentially many seconds of silence. Streaming shows tokens as they're generated, providing immediate feedback.
+Without streaming, the agent waits for the **entire response** before showing anything. With a long response, the user stares at "Thinking..." for 10+ seconds.
 
-**Without streaming:**
+Streaming shows tokens **as they're generated** - the same experience you get in ChatGPT or Claude.ai. Users see the response build in real-time.
+
+Why this matters for agents:
+- **Better UX** - Feels responsive, not frozen
+- **Early cancellation** - User can Ctrl+C if it's going wrong
+- **Tool use detection** - Know immediately when a tool call starts
+
+---
+
+## 2. Relate
+
+Before streaming:
 ```
-> Tell me about Rust
-[5 seconds of nothing]
-Rust is a systems programming language...
+User input → API call (wait...) → Full response → Display
+            └── 5-10 seconds of "Thinking..." ──┘
 ```
 
-**With streaming:**
+With streaming:
 ```
-> Tell me about Rust
-Rust is a sy|stems prog|ramming la|nguage...
-       ↑ tokens appear progressively
+User input → API call → token → token → token → ... → done
+                        └── Display each token as it arrives ──┘
 ```
 
-## Server-Sent Events (SSE)
+---
 
-Anthropic uses SSE for streaming. Instead of one JSON response, you receive a stream of events:
+## 3. Explain
+
+### Server-Sent Events (SSE)
+
+Instead of one response, the server sends a **stream of events**:
 
 ```
 event: message_start
-data: {"type":"message_start","message":{"id":"msg_01..."}}
-
-event: content_block_start
-data: {"type":"content_block_start","index":0,"content_block":{"type":"text"}}
+data: {"type": "message_start", "message": {...}}
 
 event: content_block_delta
-data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}
+data: {"type": "content_block_delta", "delta": {"text": "Hello"}}
 
 event: content_block_delta
-data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" there"}}
+data: {"type": "content_block_delta", "delta": {"text": " world"}}
 
 event: message_stop
-data: {"type":"message_stop"}
+data: {"type": "message_stop"}
 ```
 
-Each `content_block_delta` contains a piece of the response.
+### Event Types
 
-## Code Implementation
+| Event | Meaning |
+|-------|---------|
+| `message_start` | Response beginning, contains metadata |
+| `content_block_start` | A content block (text or tool_use) starting |
+| `content_block_delta` | Incremental content (the actual tokens) |
+| `content_block_stop` | Content block finished |
+| `message_delta` | Final stats (stop_reason, usage) |
+| `message_stop` | Stream complete |
 
-### Enabling Streaming
+### The Request Change
 
-Add `stream: true` to the request:
+Enable streaming by adding `"stream": true`:
 
-```rust
-#[derive(Debug, Serialize)]
-struct ApiRequest {
-    model: String,
-    max_tokens: u32,
-    messages: Vec<Message>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    system: Option<String>,
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
-    stream: bool,  // Enable streaming
+```json
+{
+  "model": "claude-sonnet-4-20250514",
+  "max_tokens": 4096,
+  "stream": true,
+  "messages": [...]
 }
 ```
 
-### Parsing the Stream
+### Why Streaming Matters for Tool Use
 
+When Claude wants to use a tool, you'll see:
+```
+content_block_start: {"type": "tool_use", "name": "read_file"}
+```
+
+With streaming, you can show "Reading file..." immediately.
+
+---
+
+## 4. Implement
+
+**api/client.rs - Streaming function:**
 ```rust
-use std::io::{BufRead, BufReader};
-
 pub fn send_messages_streaming<F>(
     api_key: &str,
     messages: Vec<Message>,
     system_prompt: Option<&str>,
-    mut on_chunk: F,  // Callback for each text chunk
-) -> Result<String, String>
+    mut on_chunk: F,
+) -> Result<ChatResponse, String>
 where
     F: FnMut(&str),
 {
     let request = ApiRequest {
-        model: "claude-sonnet-4-20250514".to_string(),
-        max_tokens: 4096,
-        messages,
-        system: system_prompt.map(|s| s.to_string()),
+        // ... other fields ...
         stream: true,
     };
 
-    let client = reqwest::blocking::Client::new();
-    let response = client
-        .post(API_URL)
-        .header("x-api-key", api_key)
-        .header("anthropic-version", API_VERSION)
+    let response = client.post(API_URL)
         .json(&request)
-        .send()
-        .map_err(|e| e.to_string())?;
+        .send()?;
 
-    // Read response line by line
+    // Read SSE stream line by line
     let reader = BufReader::new(response);
-    let mut full_text = String::new();
 
     for line in reader.lines() {
-        let line = line.map_err(|e| e.to_string())?;
+        let line = line?;
 
-        // SSE format: "data: {...}"
+        // SSE format: "data: {json}"
         if let Some(data) = line.strip_prefix("data: ") {
-            // Parse delta events
-            if let Ok(delta) = serde_json::from_str::<StreamDelta>(data) {
-                if let Some(text) = delta.text {
-                    on_chunk(&text);          // Call callback immediately
-                    full_text.push_str(&text); // Accumulate for return
+            // Parse content_block_delta events
+            if let Ok(event) = serde_json::from_str::<ContentBlockDelta>(data) {
+                if let Some(text) = event.delta.and_then(|d| d.text) {
+                    on_chunk(&text);  // Call the callback
+                    full_text.push_str(&text);
                 }
             }
         }
     }
 
-    Ok(full_text)
+    Ok(ChatResponse { text: full_text, stop_reason })
 }
 ```
 
-### The Callback Pattern
-
-The `on_chunk` callback lets the caller decide what to do with each piece:
-
+**main.rs - Using streaming:**
 ```rust
-// Print immediately as chunks arrive
-let response = send_messages_streaming(
-    api_key,
-    messages,
-    Some(SYSTEM_PROMPT),
-    |chunk| {
-        print!("{}", chunk);      // No newline - text flows continuously
-        io::stdout().flush().ok(); // Ensure it displays immediately
-    },
-)?;
-```
-
-### Handling the "Thinking..." Indicator
-
-Clear the waiting message when the first chunk arrives:
-
-```rust
-fn eval_streaming(messages: Vec<Message>, api_key: &str) -> String {
+fn eval_streaming(messages: Vec<Message>, api_key: &str, verbose: bool) -> String {
     print!("Thinking...");
     io::stdout().flush().ok();
 
     let mut first_chunk = true;
 
-    let result = send_messages_streaming(
+    let result = api::send_messages_streaming(
         api_key,
         messages,
         Some(SYSTEM_PROMPT),
         |chunk| {
+            // Clear "Thinking..." on first chunk
             if first_chunk {
-                // Overwrite "Thinking..." with spaces, return to start of line
                 print!("\r            \r");
-                io::stdout().flush().ok();
                 first_chunk = false;
             }
+            // Print chunk immediately
             print!("{}", chunk);
             io::stdout().flush().ok();
         },
     );
 
-    result.unwrap_or_else(|e| format!("Error: {}", e))
+    // Return full text for history
+    result.map(|r| r.text).unwrap_or_default()
 }
 ```
 
-## SSE Event Types
+---
 
-The stream contains different event types:
+## 5. Review
 
-| Event | Purpose |
-|-------|---------|
-| `message_start` | Beginning of response, contains message ID |
-| `content_block_start` | New content block starting (text, tool use) |
-| `content_block_delta` | Piece of content (text chunk, tool input JSON) |
-| `content_block_stop` | Content block complete |
-| `message_delta` | Message-level updates (stop_reason) |
-| `message_stop` | End of response |
+**The streaming flow:**
 
-For basic text streaming, we only need `content_block_delta` with `text_delta` type.
+```
+eval_streaming()
+├── print!("Thinking...")
+├── send_messages_streaming(..., |chunk| {
+│       if first_chunk: clear "Thinking..."
+│       print!("{}", chunk)
+│   })
+└── return full text for history
+
+send_messages_streaming()
+├── Request with stream: true
+├── BufReader for line-by-line SSE
+├── Parse "data: {json}" lines
+├── Extract text from content_block_delta
+└── Call on_chunk() for each piece
+```
+
+**Agent concepts:**
+
+| Concept | Why It Matters |
+|---------|----------------|
+| Streaming | Responsive UX, real-time output |
+| SSE parsing | Standard format for streaming APIs |
+| Callback pattern | Process chunks as they arrive |
+| Early feedback | Clear "Thinking..." on first token |
+
+---
 
 ## Key Takeaways
 
-1. **Streaming = immediate feedback** - Users see progress, not silence
-2. **SSE format** - Lines starting with `data: ` contain JSON events
-3. **Callback pattern** - Pass a function to handle each chunk
-4. **Flush stdout** - Required for immediate display in terminal
-5. **Accumulate text** - Build full response while streaming for history
-
-## What's Next
-
-Topic 8 introduces tool use—how Claude can request to run tools, and how we parse those requests from the stream.
+- Streaming makes the agent feel responsive
+- SSE is the standard format: `data: {json}` lines
+- Callbacks let you process each chunk as it arrives
+- Clear loading indicators as soon as real content starts

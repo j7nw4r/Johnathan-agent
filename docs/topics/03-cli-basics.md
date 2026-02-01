@@ -1,35 +1,93 @@
-# Topic 3: CLI Basics in Rust
+# Topic 3: CLI Basics for Agents
 
-## The Concept
+## 1. Present
 
-A command-line interface (CLI) is how users interact with our agent. Good CLI design means:
+An agent CLI needs more than just a REPL. Users expect:
+- **Pass a task directly**: `agent "fix the bug in main.rs"` (non-interactive)
+- **Configuration flags**: `--model sonnet` or `--verbose`
+- **Visual feedback**: Knowing when the agent is thinking vs acting
+- **Graceful interruption**: Ctrl+C should stop cleanly
 
-- Clear, intuitive commands
-- Helpful error messages
-- Support for common patterns (flags, arguments)
-- Two modes: interactive and scripted
+This isn't about making it pretty—it's about **communication between agent and user**.
 
-## Using Clap for Argument Parsing
+---
 
-We use the `clap` crate with its derive macros for declarative CLI definition:
+## 2. Relate
 
+Before this topic, the agent only had a bare REPL. You couldn't:
+- Pass an initial prompt from the command line
+- Know if it's thinking or waiting
+- Configure anything without editing code
+
+---
+
+## 3. Explain
+
+### Agent CLI Patterns
+
+Most agent CLIs support two modes:
+
+```
+# Interactive mode (REPL)
+$ agent
+> do something
+
+# Non-interactive mode (single task)
+$ agent "do something"
+```
+
+Non-interactive is important for scripting and pipelines:
+```bash
+agent "summarize this file" < input.txt > summary.md
+```
+
+### Visual Feedback Matters
+
+When an agent is making an API call that takes 5 seconds, silence feels broken. Users need to know:
+
+| State | Feedback |
+|-------|----------|
+| Waiting for input | Prompt (`>`) |
+| Calling LLM | Spinner or "Thinking..." |
+| Running tool | "Running: read_file..." |
+| Done | Response text |
+
+### Configuration Hierarchy
+
+Agent CLIs typically load config from multiple sources (in priority order):
+1. Command-line flags (highest)
+2. Environment variables
+3. Project config file (`.agent.toml`)
+4. User config file (`~/.config/agent/config.toml`)
+5. Defaults (lowest)
+
+### Environment Variables for Secrets
+
+API keys should **never** be hardcoded or passed as CLI arguments (visible in process lists). Environment variables are the standard:
+
+```bash
+export ANTHROPIC_API_KEY=sk-...
+agent "hello"
+```
+
+---
+
+## 4. Implement
+
+**Cargo.toml** - Added `clap` for argument parsing:
 ```toml
-# Cargo.toml
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 ```
 
-## Code Implementation
-
-### Defining the CLI Structure
+**main.rs** - CLI structure:
 
 ```rust
 use clap::Parser;
 
-/// An AI agent that can perform tasks
 #[derive(Parser)]
 #[command(name = "johnathan")]
-#[command(about = "An AI agent CLI", long_about = None)]
+#[command(about = "An AI agent CLI")]
 struct Cli {
     /// Optional prompt to run (non-interactive mode)
     prompt: Option<String>,
@@ -38,38 +96,20 @@ struct Cli {
     #[arg(short, long)]
     verbose: bool,
 }
-```
 
-This gives us:
-- `johnathan` - starts interactive REPL
-- `johnathan "do something"` - runs single prompt
-- `johnathan -v` or `johnathan --verbose` - enables debug output
-
-### Parsing and Using Arguments
-
-```rust
 fn main() {
-    let cli = Cli::parse();  // Parses args, exits on error
-
-    println!("Johnathan Agent v0.1.0");
-    println!("=======================\n");
+    let cli = Cli::parse();
 
     // Get API key from environment
     let api_key = match std::env::var("ANTHROPIC_API_KEY") {
         Ok(key) => key,
         Err(_) => {
-            eprintln!("Error: ANTHROPIC_API_KEY environment variable not set");
+            eprintln!("Error: ANTHROPIC_API_KEY not set");
             std::process::exit(1);
         }
     };
 
-    // Verbose mode shows debug info
-    if cli.verbose {
-        println!("[verbose mode enabled]");
-        println!("[API key loaded]");
-    }
-
-    // Route to appropriate mode
+    // Two modes based on whether prompt provided
     match cli.prompt {
         Some(prompt) => run_once(&prompt, &api_key, cli.verbose),
         None => run_repl(&api_key, cli.verbose),
@@ -77,69 +117,58 @@ fn main() {
 }
 ```
 
-## Environment Variables
-
-Sensitive data like API keys should come from environment variables, not command-line arguments (which appear in process lists):
-
+**Thinking indicator:**
 ```rust
-let api_key = std::env::var("ANTHROPIC_API_KEY")
-    .expect("ANTHROPIC_API_KEY must be set");
+fn eval(input: &str, api_key: &str, verbose: bool) -> String {
+    print!("Thinking...");
+    io::stdout().flush().ok();
+
+    // Do work (API call)...
+
+    print!("\r            \r");  // Clear with carriage return
+    io::stdout().flush().ok();
+
+    // Return response
+}
 ```
 
-Usage:
+---
+
+## 5. Review
+
+The CLI now supports:
+
 ```bash
-export ANTHROPIC_API_KEY=sk-ant-...
-johnathan
+$ johnathan                    # Interactive REPL
+$ johnathan "do something"     # Non-interactive, single task
+$ johnathan -v "do something"  # Verbose mode
 ```
 
-## Verbose Mode Pattern
-
-A common pattern: pass a `verbose` flag through your call stack for conditional debug output:
-
-```rust
-fn run_repl(api_key: &str, verbose: bool) {
-    // ...
-    if verbose {
-        println!("[history: {} messages]", history.len());
-    }
-    // ...
-}
-
-fn eval(messages: Vec<Message>, api_key: &str, verbose: bool) -> String {
-    // ...
-    if verbose {
-        println!("[sending {} messages to API]", messages.len());
-    }
-    // ...
-}
-```
-
-## Auto-Generated Help
-
-Clap automatically generates help from your doc comments:
+**Structure:**
 
 ```
-$ johnathan --help
-An AI agent CLI
-
-Usage: johnathan [OPTIONS] [PROMPT]
-
-Arguments:
-  [PROMPT]  Optional prompt to run (non-interactive mode)
-
-Options:
-  -v, --verbose  Print verbose output
-  -h, --help     Print help
+main()
+├── Parse CLI args (clap)
+├── Load API key from environment
+└── match cli.prompt
+    ├── Some → run_once()  # Process, print, exit
+    └── None → run_repl()  # Loop until quit
 ```
+
+**Agent concepts demonstrated:**
+
+| Concept | Implementation |
+|---------|----------------|
+| Two modes | `Option<String>` prompt - Some = non-interactive, None = REPL |
+| Feedback | "Thinking..." with carriage return to clear |
+| Configuration | `-v` flag, environment variable for API key |
+| Fail fast | Exit with clear error if API key missing |
+
+---
 
 ## Key Takeaways
 
-1. **Derive macros** - Clap's `#[derive(Parser)]` makes CLI definition declarative
-2. **Doc comments become help** - `///` comments appear in `--help` output
-3. **Environment for secrets** - Never put API keys in command-line arguments
-4. **Verbose flag pattern** - Thread through call stack for debug output
-5. **Two modes** - Optional positional arg distinguishes interactive vs one-shot
-
-## What's Next
-
-Topic 4 connects to the LLM API, turning our skeleton into a real agent that can think.
+- Non-interactive mode enables automation (CI/CD, scripts)
+- Visual feedback is critical when API calls take seconds
+- Environment variables keep secrets out of command history
+- Two modes: interactive for exploration, non-interactive for automation
